@@ -49,6 +49,6 @@ jobs:
           tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.REPOSITORY_NAME }}:test-${{ steps.image_tag.outputs.image_tag }}
           platforms: linux/amd64
           build-args: |
-            VERSION=test-${{ steps.image_tag.outputs.image_tag }}
+            VERSION="0.5.1-patch2"
           cache-from: type=gha
           cache-to: type=gha,mode=min,ignore-error=true
