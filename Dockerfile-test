@@ -1,0 +1,80 @@
+# syntax=docker/dockerfile:1.7
+
+ARG GO_VERSION="1.23.4"
+ARG ALPINE_VERSION="3.20"
+
+FROM alpine:${ALPINE_VERSION} AS genesis-downloader
+
+RUN apk add --no-cache ca-certificates jq wget \
+    && install -d /genesis \
+    && wget -q \
+      https://raw.githubusercontent.com/FirmaChain/mainnet/main/colosseum-1/genesis.json \
+      -O /genesis/colosseum-1.json \
+    && wget -q \
+      https://raw.githubusercontent.com/FirmaChain/testnet/master/imperium-4/genesis.json \
+      -O /genesis/imperium-4.json \
+    && test "$(jq -r '.chain_id' /genesis/colosseum-1.json)" = "colosseum-1" \
+    && test "$(jq -r '.chain_id' /genesis/imperium-4.json)" = "imperium-4"
+
+# Running the builder on the target platform makes uname select the matching
+# wasmvm musl archive (x86_64 for amd64, aarch64 for arm64).
+FROM --platform=$TARGETPLATFORM golang:${GO_VERSION}-alpine${ALPINE_VERSION} AS go-builder
+
+WORKDIR /src
+
+RUN apk add --no-cache binutils-gold build-base ca-certificates git linux-headers wget
+
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+RUN set -eux; \
+    archive="libwasmvm_muslc.$(uname -m).a"; \
+    wasmvm_version="$(go list -m -f '{{.Version}}' github.com/CosmWasm/wasmvm/v2)"; \
+    wasmvm_base_url="https://github.com/CosmWasm/wasmvm/releases/download/${wasmvm_version}"; \
+    wget -q "${wasmvm_base_url}/${archive}" -O "/lib/${archive}"; \
+    wget -q "${wasmvm_base_url}/checksums.txt" -O /tmp/checksums.txt; \
+    expected="$(awk -v name="${archive}" '$2 == name { print $1 }' /tmp/checksums.txt)"; \
+    test -n "${expected}"; \
+    echo "${expected}  /lib/${archive}" | sha256sum -c -
+
+COPY . .
+
+ARG VERSION="dev"
+
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    GOWORK=off go build \
+    -mod=readonly \
+    -tags "netgo,muslc" \
+    -ldflags "-X github.com/cosmos/cosmos-sdk/version.Name=FirmaChain \
+    -X github.com/cosmos/cosmos-sdk/version.AppName=firmachaind \
+    -X github.com/cosmos/cosmos-sdk/version.Version=${VERSION} \
+    -w -s -linkmode=external -extldflags '-Wl,-z,muldefs -static'" \
+    -trimpath \
+    -o /out/firmachaind \
+    ./cmd/firmachaind
+
+FROM alpine:${ALPINE_VERSION}
+
+RUN apk add --no-cache ca-certificates curl jq \
+    && addgroup -S -g 10001 firmachain \
+    && adduser -S -D -H -u 10001 -G firmachain firmachain \
+    && install -d -o firmachain -g firmachain /var/lib/firmachain
+
+COPY --from=go-builder /out/firmachaind /usr/local/bin/firmachaind
+COPY --from=genesis-downloader /genesis /usr/share/firmachain/genesis
+
+ENV HOME="/var/lib/firmachain" \
+    FIRMACHAIN_HOME="/var/lib/firmachain"
+
+WORKDIR /var/lib/firmachain
+USER 10001:10001
+
+# REST, gRPC, CometBFT P2P, CometBFT RPC
+EXPOSE 1317 9090 26656 26657
+VOLUME ["/var/lib/firmachain"]
+
+ENTRYPOINT ["/usr/local/bin/firmachaind"]
+CMD ["start", "--home", "/var/lib/firmachain"]
