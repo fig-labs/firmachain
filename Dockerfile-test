@@ -56,14 +56,14 @@ RUN apk add --no-cache ca-certificates curl jq \
     && adduser -S -D -H -u 10001 -G firmachain firmachain \
     && install -d -o firmachain -g firmachain /var/lib/firmachain
 
-COPY --from=go-builder /out/firmachaind /usr/local/bin/firmachaind
+COPY --from=builder /out/firmachaind /usr/local/bin/firmachaind
 
 ENV HOME="/var/lib/firmachain"
 
 WORKDIR /var/lib/firmachain
 USER 10001:10001
 
-# REST, gRPC, CometBFT P2P, CometBFT RPC
+# REST, gRPC, CometBFT P2P, CometBFT RPC ports
 EXPOSE 1317 9090 26656 26657
 
 ENTRYPOINT ["/usr/local/bin/firmachaind"]
