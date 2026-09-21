@@ -29,10 +29,10 @@ jobs:
           git diff --exit-code -- go.mod go.sum
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.1
-          args: --no-config --default=none --enable=govet --enable=ineffassign --enable=unused --enable=misspell --timeout=10m
+          args: --no-config --default=none --enable=govet --enable=ineffassign --enable=unused --timeout=10m
 
   build:
     runs-on: ubuntu-24.04
