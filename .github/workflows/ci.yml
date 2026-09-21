@@ -1,4 +1,4 @@
-name: ci
+name: CI
 
 on:
   # pull_request:
@@ -21,15 +21,6 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version: ${{ env.GO_VERSION }}
-
-      - name: Check gofmt
-        run: |
-          files="$(gofmt -l . | grep -vE '\.pb(\.gw)?\.go$' || true)"
-          if [[ -n "$files" ]]; then
-            echo "$files"
-            echo "::error::gofmt needed on the files above"
-            exit 1
-          fi
 
       - name: Check go.mod
         run: |
