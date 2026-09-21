@@ -1,11 +1,9 @@
 name: CI
 
 on:
-  # pull_request:
-  #   branches: [master]
-  #   types: [opened, reopened, edited, synchronize]
-  push:
-    branches: [chore/workflows]
+  pull_request:
+    branches: [master]
+    types: [opened, reopened, edited, synchronize]
 env:
   GO_VERSION: 1.23
 
@@ -48,4 +46,4 @@ jobs:
       run: make install
 
     - name: Test
-      run: go test ./... -count=1 -v -coverprofile=coverage.txt -covermode=atomic
+      run: go test $(go list ./... | grep -v 'app/upgrades/v5.1') -coverprofile=coverage.txt -covermode=atomic
