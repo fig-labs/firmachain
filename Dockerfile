@@ -1,70 +1,31 @@
-# Go Version
-ARG GO_VERSION="1.23.4"
-ARG GO_IMAGE_DIGEST="sha256:6a84ccdb73e005d0ee7bfff6066f230612ca9dff3e88e31bfc752523c3a271f8"
-# WASMVM Version
-ARG WASMVM_VERSION="v2.2.4"
-ARG WASMVM_SHA256="70c989684d2b48ca17bbd55bb694bbb136d75c393c067ef3bdbca31d2b23b578"
+ARG IMG_TAG=latest
 
-FROM golang:${GO_VERSION}-alpine3.20@${GO_IMAGE_DIGEST} AS builder
-
+FROM golang:1.23.4-alpine AS builder
 WORKDIR /src
+ENV PACKAGES="curl build-base git bash file linux-headers"
+RUN apk add --no-cache $PACKAGES
 
-RUN apk add --no-cache binutils-gold build-base ca-certificates file git linux-headers wget
+# https://github.com/CosmWasm/wasmvm/releases
+ARG WASMVM_VERSION=v2.2.4
+ADD https://github.com/CosmWasm/wasmvm/releases/download/${WASMVM_VERSION}/libwasmvm_muslc.x86_64.a /lib/libwasmvm_muslc.x86_64.a
+RUN sha256sum /lib/libwasmvm_muslc.x86_64.a | grep 70c989684d2b48ca17bbd55bb694bbb136d75c393c067ef3bdbca31d2b23b578
+RUN cp /lib/libwasmvm_muslc.x86_64.a /lib/libwasmvm_muslc.a
 
-COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
-    go mod download
-
-ARG TARGETARCH
-ARG WASMVM_VERSION
-ARG WASMVM_SHA256
-
-RUN test "${TARGETARCH}" = "amd64" \
-    && test "$(go list -m -f '{{.Version}}' github.com/CosmWasm/wasmvm/v2)" = "${WASMVM_VERSION}" \
-    && wget -q \
-      "https://github.com/CosmWasm/wasmvm/releases/download/${WASMVM_VERSION}/libwasmvm_muslc.x86_64.a" \
-      -O /lib/libwasmvm_muslc.x86_64.a \
-    && echo "${WASMVM_SHA256}  /lib/libwasmvm_muslc.x86_64.a" | sha256sum -c -
+COPY go.mod go.sum* ./
+RUN go mod download
 
 COPY . .
+RUN LEDGER_ENABLED=false LINK_STATICALLY=true BUILD_TAGS=muslc make build
+RUN echo "Ensuring binary is statically linked ..." \
+    && file /src/build/firmachaind | grep "statically linked"
 
-ARG VERSION
-ARG COMMIT
-
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
-    test -n "${VERSION}" \
-    && test -n "${COMMIT}" \
-    && CGO_ENABLED=1 GOOS=linux GOARCH=amd64 GOWORK=off go build \
-    -mod=readonly \
-    -tags "netgo,muslc" \
-    -ldflags "-X github.com/cosmos/cosmos-sdk/version.Name=FirmaChain \
-    -X github.com/cosmos/cosmos-sdk/version.AppName=firmachaind \
-    -X github.com/cosmos/cosmos-sdk/version.Version=${VERSION} \
-    -X github.com/cosmos/cosmos-sdk/version.Commit=${COMMIT} \
-    -w -s -linkmode=external -extldflags '-Wl,-z,muldefs -static'" \
-    -trimpath \
-    -o /out/firmachaind \
-    ./cmd/firmachaind \
-    && file /out/firmachaind | grep -Eq "ELF 64-bit.*x86-64.*statically linked"
-
-FROM alpine:3.20 AS runner
-
-RUN apk add --no-cache ca-certificates curl jq \
-    && addgroup -S -g 10001 firmachain \
-    && adduser -S -D -H -u 10001 -G firmachain firmachain \
-    && install -d -o firmachain -g firmachain /var/lib/firmachain
-
-COPY --from=builder /out/firmachaind /usr/local/bin/firmachaind
-
-ENV HOME="/var/lib/firmachain"
-
-WORKDIR /var/lib/firmachain
+FROM alpine:$IMG_TAG
+RUN apk add --no-cache ca-certificates curl jq
+RUN addgroup -g 10001 nonroot
+RUN adduser -D nonroot -u 10001 -G nonroot
+COPY --from=builder /src/build/firmachaind /usr/local/bin/
+EXPOSE 26656 26657 1317 9090
 USER 10001:10001
 
-# REST, gRPC, CometBFT P2P, CometBFT RPC ports
-EXPOSE 1317 9090 26656 26657
-
-ENTRYPOINT ["/usr/local/bin/firmachaind"]
-CMD ["start", "--home", "/var/lib/firmachain"]
+ENTRYPOINT ["firmachaind"]
+CMD ["start"]
