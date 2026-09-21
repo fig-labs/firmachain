@@ -5,6 +5,9 @@ BRANCH := $(shell git branch --show-current)
 
 include Makefile.ledger
 
+build_tags += $(BUILD_TAGS)
+build_tags := $(strip $(build_tags))
+
 whitespace :=
 whitespace += $(whitespace)
 comma := ,
@@ -14,27 +17,27 @@ ldflags = -X github.com/cosmos/cosmos-sdk/version.Name=FirmaChain \
 	-X github.com/cosmos/cosmos-sdk/version.AppName=firmachaind \
 	-X github.com/cosmos/cosmos-sdk/version.Version=$(VERSION) \
 	-X github.com/cosmos/cosmos-sdk/version.Commit=$(COMMIT) \
-	-X "github.com/cosmos/cosmos-sdk/version.BuildTags=$(build_tags_comma_sep)" \
+	-X "github.com/cosmos/cosmos-sdk/version.BuildTags=$(build_tags_comma_sep)"
 
-ifeq ($(LEDGER_ENABLED),true)
-	BUILD_FLAGS := -ldflags '$(ldflags)' -tags $(build_tags)
-else
-	BUILD_FLAGS := -ldflags '$(ldflags)' $(build_tags)
+ifeq ($(LINK_STATICALLY),true)
+	ldflags += -linkmode=external -extldflags "-Wl,-z,muldefs -static"
 endif
+
+BUILD_FLAGS := -ldflags '$(ldflags)' -tags "$(build_tags)"
 
 DOCKER := $(shell which docker)
 
 all: install
 
+build:
+	mkdir -p build
+	go build -mod=readonly $(BUILD_FLAGS) -o build/firmachaind ./cmd/firmachaind
+
 install: go.sum
-		go install -mod=readonly $(BUILD_FLAGS) ./cmd/firmachaind
+	go install -mod=readonly $(BUILD_FLAGS) ./cmd/firmachaind
 
 docker-img-from-current-branch:
-	docker build \
-		--build-arg GIT_VERSION=$(VERSION) \
-		--build-arg GIT_COMMIT=$(COMMIT) \
-		--build-arg GIT_BRANCH=$(BRANCH) \
-		-t firmachain .
+	docker build -t firmachain .
 
 go.sum: go.mod
 		@echo "--> Ensure dependencies have not been modified"
